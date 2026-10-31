@@ -274,14 +274,18 @@ def main():
     def sled_picture(p):
         """Panel p's picture is the sled of rank SLED_PICTURE, or the top
         rank while SIZE has fewer, doubled and centered on the panel, with
-        its jets."""
+        its jets. Its image is that sled's, as scene_picture_sled() loads it
+        from sleds.bin, and not another picture."""
         rank = min(sym['SLED_PICTURE'], len(tune[SIZE][1]))
         width, doubled = tune[SIZE][0][rank], sym['MODE5_HDOUBLE'] | sym['MODE5_VDOUBLE']
-        x, _, _, _, size, attributes = struct.unpack('<hhHHBB', game.xram(slot_sprite(p, 0), 10))
+        x, _, image, _, size, attributes = struct.unpack('<hhHHBB', game.xram(slot_sprite(p, 0), 10))
         jets = game.shown(slot_sprite(p, 1), sym['PICTURE_SPRITES'] - 1)
         check(size == (8 // 4 - 1) << 4 | ((width + 3) // 4 - 1) and attributes & doubled == doubled and
               x == panel_left(p) + (sym['PANEL_COLS'] * 8 - 2 * width) // 2 and jets == game.ram(f'jets+{rank}'),
               f'panel {p} shows the sled of rank {rank}, {width} px, doubled and centered, with its {jets} jets')
+        sled = sym['SLED_WIDTH_MAX'] * 8 // 2
+        check(game.xram(image, sled) == art('sleds.bin')[rank * sym['SLED_SLOT']:][:sled],
+              "and its image is that sled's, not another picture")
 
     build = os.path.dirname(os.path.dirname(rom()))
     art = lambda name: open(os.path.join(build, name), 'rb').read()
@@ -448,7 +452,9 @@ def main():
     # The first cost of more than one color, raised to with the cheat, with
     # none of the color of its last part and enough of the rest, shows short
     # digits for that color's parts only, and is not bought. It is lowered
-    # again after.
+    # again after. The cheat goes a rank past it and back, as a panel draws
+    # again only when a rank changes, so it shows the nuggets poked even
+    # for a first rank.
     split = [(p, rank) for p in range(len(upgrades)) for rank, cost in enumerate(tune[p][1])
              if len({c for _, c in cost}) > 1]
     if split:
@@ -458,8 +464,9 @@ def main():
         stock([[(n, c) for n, c in cost if c != none]])
         pick(p)
         game.cmd('press lshift')
-        for _ in range(rank):
+        for _ in range(rank + 1):
             game.tap('right')
+        game.tap('left')
         game.run(2)
         panel_shows(p)
         game.cmd('release lshift')

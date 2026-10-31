@@ -346,14 +346,14 @@ typedef struct
    in 15 colors, and the middle is behind the panels, in 4 grays. */
 #define BACKDROP_BANDS 3
 
-/* The pictures of the panels nearest the middle, each up to PICTURE_BYTES:
-   the three that show, and the next one the way the rail moves, which
-   loads before it slides into view. A picture is a flat sled, in the sled's
-   colors, or one in its own, lit and dim: the weight, art/weight.png and
-   art/weight-colors.png, or the jerrycan, art/jerrycan.png and
-   art/jerrycan-colors.png. The balls' panel needs none: it shows the
-   count of balls, the counts' icon with the number in the panels' font. */
-#define PICTURE_SLOTS 4
+/* The pictures of the panels, each up to PICTURE_BYTES, a slot for each
+   but the sled, which size and speed share. A picture is a flat sled, in
+   the sled's colors, or one in its own, lit and dim: the weight,
+   art/weight.png and art/weight-colors.png, or the jerrycan,
+   art/jerrycan.png and art/jerrycan-colors.png. The balls' panel needs
+   none: it shows the count of balls, the counts' icon with the number in
+   the panels' font. */
+#define PICTURE_SLOTS 3
 #define PICTURE_BYTES 1024
 #define WEIGHT_W 40
 #define WEIGHT_H 40

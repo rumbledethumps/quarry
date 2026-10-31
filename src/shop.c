@@ -165,14 +165,13 @@ static uint8_t picture_shown[PANEL_SLOTS * PANEL_SPRITES];
    after, in slots side by side, as the map wraps. */
 static uint8_t slot_holds[PANEL_SLOTS];
 
-/* The pictures of the panels near the one picked are in slots of XRAM,
-   panel p's in slot p % PICTURE_SLOTS: the three that show, and the next
-   one the way the rail last moved, which loads before it slides into
-   view. Those are four panels side by side, so each has a slot. */
-static uint8_t slot_panel[PICTURE_SLOTS]; /* whose picture each slot holds, or PANELS */
-static int8_t heading = 1; /* the way the rail last moved: 1 to the panels on the right, -1 to the left */
+/* The pictures, each in its slot of XRAM, loaded as the screen opens: the
+   weight, the jerrycan, and the sled, which size and speed share. */
+#define PICTURE_WEIGHT 0
+#define PICTURE_JERRYCAN 1
+#define PICTURE_SLED 2
 
-_Static_assert(PICTURE_SLOTS >= 4, "A slot for each of the four panels near the one picked.");
+_Static_assert(PICTURE_SLOTS == 3, "A slot for each picture.");
 
 static uint8_t unlocking; /* the level being unlocked, or 0 */
 static uint8_t unlock_steps;
@@ -412,31 +411,12 @@ static unsigned trolley_image(int16_t x)
            (x / 2 & (BACKDROP_TROLLEY_FRAMES - 1)) * (BACKDROP_TROLLEY_W * BACKDROP_TROLLEY_H / 2);
 }
 
-/* Whether panel p's picture is in its slot. */
-static uint8_t picture_ready(uint8_t p)
-{
-    return slot_panel[p % PICTURE_SLOTS] == p;
-}
-
-/* Loads the pictures of the panels near the one picked that aren't in
-   their slots yet. The balls' panel has none to load. */
+/* Loads the pictures into their slots. */
 static void pictures_load(void)
 {
-    int8_t first = panel_picked - (heading < 0 ? 2 : 1);
-    uint8_t p = first > 0 ? first : 0;
-
-    for (; p <= first + 3 && p < PANELS; p++)
-        if (p != UPGRADE_BALLS && !picture_ready(p))
-        {
-            uint8_t slot = p % PICTURE_SLOTS;
-            if (p == UPGRADE_DAMAGE)
-                scene_picture_weight(slot);
-            else if (p == UPGRADE_EFFICIENCY)
-                scene_picture_jerrycan(slot);
-            else
-                scene_picture_sled(slot, sled_picture());
-            slot_panel[slot] = p;
-        }
+    scene_picture_weight(PICTURE_WEIGHT);
+    scene_picture_jerrycan(PICTURE_JERRYCAN);
+    scene_picture_sled(PICTURE_SLED, sled_picture());
 }
 
 /* A panel's picture and cost icons, where it is now: for balls, the icon
@@ -468,13 +448,12 @@ static void pictures_draw(uint8_t p)
     else if (p == UPGRADE_WIDTH || p == UPGRADE_SPEED)
     {
         uint8_t rank = sled_picture(), w = upgrades_width_at(rank) * 2;
-        if (picture_ready(p))
-            sled_show(PANEL_SPRITE(p, 0), PICTURE_SPRITES, x + (PANEL_COLS * 8 - w) / 2, top + 7, rank,
-                      SLED_DOUBLE | dim | SLED_FLAMES, XRAM_PICTURE(p % PICTURE_SLOTS));
+        sled_show(PANEL_SPRITE(p, 0), PICTURE_SPRITES, x + (PANEL_COLS * 8 - w) / 2, top + 7, rank,
+                  SLED_DOUBLE | dim | SLED_FLAMES, XRAM_PICTURE(PICTURE_SLED));
     }
-    else if (picture_ready(p))
+    else
     {
-        uint8_t slot = p % PICTURE_SLOTS, weight = p == UPGRADE_DAMAGE;
+        uint8_t weight = p == UPGRADE_DAMAGE, slot = weight ? PICTURE_WEIGHT : PICTURE_JERRYCAN;
         uint8_t w = weight ? WEIGHT_W : JERRYCAN_W, h = weight ? WEIGHT_H : JERRYCAN_H;
         sprite_set(PANEL_SPRITE(p, 0), XRAM_PICTURE(slot), XRAM_PICTURE_COLORS(slot, !panel_lit[p]), MODE5_SIZE(w, h));
         sprite_move(PANEL_SPRITE(p, 0), x + (PANEL_COLS * 8 - w) / 2, top);
@@ -881,8 +860,6 @@ void shop_open(uint8_t on)
     for (p = 0; p < PANEL_SLOTS; p++)
         slot_holds[p] = PANELS + 1;
     panels_fill();
-    for (p = 0; p < PICTURE_SLOTS; p++)
-        slot_panel[p] = PANELS;
     pictures_load();
     pictures_place();
     for (p = 0; p < LOCKS; p++)
@@ -1018,8 +995,6 @@ uint8_t shop_step(void)
         if (cursor_on == ON_RAIL && (right ? panel_picked + 1 < PANELS : panel_picked > 0))
         {
             panel_picked += right ? 1 : -1;
-            heading = right ? 1 : -1;
-            pictures_load();
             pictures_dirty = 1;
             moved = 1;
         }
