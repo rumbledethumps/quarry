@@ -62,13 +62,12 @@
 #define TUNE_BALLS {1, 2, 3, 4, 5, 6} /* at the start of a level */
 #define TUNE_BALL_COSTS {{1}, {20}, {25, RED(25)}, {30, GREEN(30)}, {50, RED(50), GREEN(50)}}
 #define TUNE_DAMAGES {1, 2, 3, 4, 5, 6, 7}  /* a brick's hit */
-#define TUNE_DAMAGE_COSTS {{RED(1)}, {RED(10)}, {RED(25)}, {GREEN(1)}, {GREEN(10)}, {GREEN(25)}}
+#define TUNE_DAMAGE_COSTS {{RED(1)}, {RED(10)}, {RED(25)}, {GREEN(1)}, {GREEN(5)}, {GREEN(25)}}
 #define TUNE_SPEEDS {100, 110, 120, 130, 140, 150} /* px a second */
 #define TUNE_SPEED_COSTS {{10}, {25}, {RED(10)}, {RED(25)}, {GREEN(10)}}
-#define TUNE_WIDTHS {17, 20, 23, 26, 29, 32, 35, 38} /* px, 64 at most */
-#define TUNE_WIDTH_COSTS {{10}, {25}, {25, RED(5)}, {25, RED(10)}, {25, GREEN(5)}, {25, GREEN(10)}, \
-                          {25, RED(25), GREEN(25)}}
-#define TUNE_JETS {1, 1, 1, 2, 2, 2, 2, 3} /* visible jets, 3 at most */
+#define TUNE_WIDTHS {17, 20, 23, 26, 30, 34, 38} /* px, 64 at most */
+#define TUNE_WIDTH_COSTS {{10}, {25}, {25, RED(5)}, {25, RED(10)}, {25, GREEN(10)}, {25, RED(25), GREEN(25)}}
+#define TUNE_JETS {1, 1, 1, 2, 2, 2, 3} /* visible jets, 3 at most */
 
 /* The paddle is cut into six zones of equal width. The two in the center
    send the ball up steeply, the zones beside them at 45 degrees, and the
