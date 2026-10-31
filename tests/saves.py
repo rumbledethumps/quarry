@@ -20,17 +20,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 from rp6502 import Symbols  # noqa: E402
 
 SAVE = 'quarry.save'
-TAG = b'QRY7'
+TAG = b'QRY9'
 SYM = Symbols(os.path.splitext(rom())[0] + '.sym')
+COLORS = SYM['BRICK_COLORS']
+NO_NUGGETS = (0,) * COLORS
 NO_RANKS = (0,) * SYM['UPGRADES']
-NEW_GAME = (0, 0, NO_RANKS, 0, 1, 1, 0, 0)  # as read_save() gives it
+NEW_GAME = (NO_NUGGETS, 0, NO_RANKS, 0, 1, 1, 0, 0)  # as read_save() gives it
 
 
 def read_save(folder):
-    """The save, save_t of src/save.c, as (gray nuggets, coins, upgrade
-    ranks, levels cleared, level picked, levels shown open, talks seen,
-    lines of the counts shown), or None, with no file or an empty one, as
-    Delete Save leaves it."""
+    """The save, save_t of src/save.c, as (the nuggets of each color, coins,
+    upgrade ranks, levels cleared, level picked, levels shown open, talks
+    seen, lines of the counts shown), or None, with no file or an empty
+    one, as Delete Save leaves it."""
     path = os.path.join(folder, SAVE)
     if not os.path.exists(path) or not os.path.getsize(path):
         return None
@@ -40,7 +42,24 @@ def read_save(folder):
     values = struct.unpack(f'<{colors}HH{upgrades}B5B', data[4:])
     nuggets, coins = values[:colors], values[colors]
     ranks, rest = values[colors + 1:colors + 1 + upgrades], values[colors + 1 + upgrades:]
-    return (nuggets[0], coins, ranks) + rest
+    return (nuggets, coins, ranks) + rest
+
+
+def table(game, name, size):
+    """size bytes of the game's RAM from name."""
+    return game.ram(name, size).to_bytes(size, 'little')
+
+
+def nuggets(game):
+    """The nuggets of each color, in the game's RAM."""
+    return struct.unpack(f'<{COLORS}H', table(game, 'nuggets', 2 * COLORS))
+
+
+def broken(game):
+    """The bricks broken in the level, of each color."""
+    bricks = game.ram('brick_count')
+    alive, color = table(game, 'brick_alive', bricks), table(game, 'brick_color', bricks)
+    return tuple(sum(not a and c == k for a, c in zip(alive, color)) for k in range(COLORS))
 
 
 class Title:
@@ -95,20 +114,32 @@ def main():
     print('ok: a new game from the greeting, saved when the level starts')
 
     # Pausing saves the nuggets, with those still on their way, and holds
-    # the game still. Esc again, or Start, carries on.
-    game.tap('space')
-    game.wait('brick', 600)
+    # the game still. Esc again, or Start, carries on. So that a brick
+    # breaks at once, whatever the level, every brick breaks at a hit, and
+    # the ball, once launched, is put under the lowest brick, flying
+    # straight up, with spare balls so play goes on after it falls.
+    game.cmd('press space')
+    game.wait('launch', 5)
+    game.cmd('release space')
+    bricks, flying = game.ram('brick_count'), game.sym['BALL_FLYING']
+    ys = struct.unpack(f'<{bricks}h', table(game, 'brick_y', 2 * bricks))
+    x, y = game.ram(f'brick_x+{2 * ys.index(max(ys))}', 2), max(ys)
+    game.paused_poke([(f'brick_hits+{i}', 1, 1) for i in range(bricks)] +
+                     [('balls', 9, 1), ('ball_x', (x + (game.sym['BRICK_W'] - game.sym['BALL_SIZE']) // 2) << 8, 4),
+                      ('ball_y', (y + game.sym['BRICK_H']) << 8, 4), ('ball_vx', 0, 2), ('ball_vy', -600, 2)])
+    game.wait('brick', 60)
     game.run(3)
     game.tap('escape')
     game.until('game_state', 'STATE_PAUSE', 10)
     game.run(2)
     check(all(game.shows(w) for w in ['PAUSED', 'RESUME', 'TO THE DRY', 'RESTART', 'MAIN MENU']),
           'the pause menu')
-    broken = game.sym['LEVEL1_BRICKS'] - game.ram('bricks_left')
-    saved = read_save(folder)
-    check(saved and saved[0] == broken, f'pausing saves a nugget for each broken brick, {saved} for {broken}')
+    saved, gone = read_save(folder), broken(game)
+    check(saved and saved[0] == gone,
+          f'pausing saves a nugget of its color for each broken brick, {saved} for {gone}')
     check(saved[6] == game.sym['TALK_SEEN_FOREMAN'], "and that the foreman's word was seen")
-    check(saved[7] == 1 << game.sym['BRICK_GRAY'], "and that the gray nuggets' line of the counts shows")
+    check(saved[7] == sum(1 << c for c, n in enumerate(gone) if n),
+          'and that the lines of the counts of those colors show')
     ball = 'XRAM_BALL_SPRITE'
     tape = f'XRAM_MENU_PALETTE+{game.sym["MENU_TAPE"] * 2}'
     where, energy = game.sprite(ball), game.ram('energy', 2)
@@ -132,15 +163,17 @@ def main():
         game.until('game_state', 'STATE_PAUSE', 10)
         game.tap('space')
         game.until('game_state', 'STATE_PLAY', 10)
-    print(f'ok: paused with {broken} nuggets saved, and carried on, and Select, P and Pause pause too')
+    print(f'ok: paused with the nuggets of {gone} saved, and carried on, and Select, P and Pause pause too')
 
     # The level ends, and that saves too.
     os.remove(os.path.join(folder, SAVE))
-    game.paused_poke([('balls', 0, 1), ('ball_y', 225 << 8, 4), ('ball_vx', 0, 2), ('ball_vy', 600, 2)])
+    drop = [('balls', 0, 1), ('ball_state', flying, 1), ('ball_y', 225 << 8, 4), ('ball_vx', 0, 2),
+            ('ball_vy', 600, 2)]  # the last ball, falling off the bottom
+    game.paused_poke(drop)
     game.wait('out of balls', 60)
     game.run(2)
-    broken = game.sym['LEVEL1_BRICKS'] - game.ram('bricks_left')
-    check(read_save(folder) and read_save(folder)[0] == broken, f'a level ending saves, {broken} nuggets')
+    gone = broken(game)
+    check(read_save(folder) and read_save(folder)[0] == gone, f'a level ending saves, {gone} nuggets')
 
     # Esc does nothing on the menu when a level ends. Replay plays the level
     # again, which saves, with its curtains, texture and frame as they were.
@@ -154,7 +187,7 @@ def main():
         """The level's curtain set, its texture's place, and its frame set's colors."""
         return game.ram('curtain_set'), game.xram('XRAM_TEXTURE_CONFIG', 8), game.xram('XRAM_FRAME_PALETTE', 32)
     cave = look()
-    game.menu_choose('REPLAY', wait=False)
+    game.menu_choose('REPLAY')
     game.wait('level 1 start', 30)  # logged once it has saved
     check(read_save(folder) is not None, 'the level starting saves')
     check(look() == cave, 'the level played again keeps its curtains, its texture and its frame')
@@ -172,19 +205,29 @@ def main():
     check(look() == cave, 'with its curtains, texture and frame')
     print('ok: Replay and Restart')
 
-    # A purchase on the upgrade screen saves. Esc there asks to go back to
-    # the title, which has the save's panels now.
+    # A purchase on the upgrade screen saves: a ball more, on the BALLS
+    # panel, wherever it is on the rail, with nuggets enough of each color
+    # it costs, and 20 over. Esc there asks to go back to the title, which
+    # has the save's panels now.
     game.ready()
-    game.paused_poke([('balls', 0, 1), ('ball_state', 1, 1), ('ball_y', 225 << 8, 4), ('ball_vx', 0, 2),
-                      ('ball_vy', 600, 2)])
+    game.paused_poke(drop)
     game.wait('out of balls', 3000)
     game.menu_choose('TO THE DRY')
     game.talk_ok()
-    game.poke('nuggets', 20, 2)
-    left = 20 - game.ram('width_costs', 2)  # after the first width
+    balls = game.sym['UPGRADE_BALLS']
+    picked = game.ram('panel_picked')
+    for _ in range(abs(balls - picked)):
+        game.tap('right' if balls > picked else 'left')
+    check(game.ram('panel_picked') == balls, 'the rail moves to the BALLS panel')
+    need = game.cost_in(balls)
+    for color, count in enumerate(need):
+        if count:
+            game.poke(f'nuggets+{2 * color}', count + 20, 2)
+    left = tuple(n - need[c] for c, n in enumerate(nuggets(game)))
+    bought = tuple(int(u == balls) for u in range(game.sym['UPGRADES']))
     game.tap('enter')
-    game.wait('bought width 1', 10)
-    check(read_save(folder)[:3] == (left, 0, (1,) + NO_RANKS[1:]), 'buying saves the upgrade bought')
+    game.wait('bought balls 1', 10)
+    check(read_save(folder)[:3] == (left, 0, bought), 'buying saves the upgrade bought')
     game.tap('escape')
     check(game.shows('RETURN TO TITLE?'), 'Esc asks to go back to the title')
     game.tap('space')  # YES
@@ -226,16 +269,18 @@ def main():
     print(f'ok: left and right leave the menu, and Shift switches the {sets} curtain sets')
     game.tap('space')
     game.until('game_state', 'STATE_SHOP', 120)
-    check(game.ram('nuggets', 2) == left, 'Continue Game opens the upgrade screen with the nuggets')
-    check(game.shown('XRAM_NUGGET_ICONS', game.sym['BRICK_COLORS']) == 1, 'and their line of the counts')
-    check(game.ram('upgrade_ranks') == 1, 'and the upgrade')
+    check(nuggets(game) == left, 'Continue Game opens the upgrade screen with the nuggets')
+    shown = bin(read_save(folder)[7] & ((1 << COLORS) - 1)).count('1')  # of the nuggets' lines, not the coins'
+    check(game.shown('XRAM_NUGGET_ICONS', COLORS) == shown, 'and their lines of the counts, as saved')
+    check(table(game, 'upgrade_ranks', game.sym['UPGRADES']) == bytes(bought), 'and the upgrade')
     check(game.ram('cursor_on') == game.sym['SHOP_ON_LEVELS'], 'on the level select, coming from the title')
     game.tap('space')
     game.tap('space')  # YES, begin the level
     game.until('game_state', 'STATE_PLAY', 60)
-    game.run(2)
-    check(game.ram('paddle_width') == game.ram('widths+1'), 'the level has the upgrade, on the paddle')
-    print(f'ok: came back, and Continue Game brought back {left} nuggets and a wider paddle')
+    game.ready()
+    check(game.ram('balls') == game.ram('ball_counts+1') - 1,
+          'the level has the upgrade, a ball more, with one of them on the sled')
+    print(f'ok: came back, and Continue Game brought back {sum(left)} nuggets and a ball more')
 
     # Main Menu from the pause menu goes to the title. Delete Save asks
     # first, in the panels' place, with No picked. Esc and No keep the save.
@@ -256,11 +301,11 @@ def main():
     check(asked(), 'it asks again')
     game.tap('space')  # NO, picked first
     check(not game.shows('DELETE SAVE?') and title.picked() == 'DELETE SAVE', 'No goes back to the panels')
-    check(read_save(folder)[:3] == (left, 0, (1,) + NO_RANKS[1:]), 'and No keeps the save')
+    check(read_save(folder)[:3] == (left, 0, bought), 'and No keeps the save')
 
     # With every level cleared and every upgrade bought, the progress says
     # so, when the panels come back.
-    tops = game.ram('ranks', game.sym['UPGRADES']).to_bytes(game.sym['UPGRADES'], 'little')
+    tops = table(game, 'ranks', game.sym['UPGRADES'])
     game.poke('levels_cleared', game.sym['LEVELS'])
     for u, top in enumerate(tops):
         game.poke(f'upgrade_ranks+{u}', top)
@@ -283,13 +328,15 @@ def main():
     game.run(30)
     check(title.greeting() and game.shown('XRAM_CURSOR_SPRITES', 4) == 4,
           'and the dwarf greets the player, with the cursor round Start Game')
-    check(game.ram('nuggets', 2) == 0 and game.ram('upgrade_ranks') == 0, 'and the game is a new one')
+    check(nuggets(game) == NO_NUGGETS and not game.ram('upgrade_ranks', game.sym['UPGRADES']),
+          'and the game is a new one')
     game.tap('space')
     game.until('game_state', 'STATE_PLAY', 60)
     game.run(2)
     check(read_save(folder) == NEW_GAME, 'Start Game saves a new game')
-    check(game.ram('showing') == game.sym['TALK_FOREMAN'] and game.ram('paddle_width') == game.ram('widths'),
-          "and starts over, with the foreman's word")
+    # The foreman's word holds the level, so no ball has come to the sled yet.
+    check(game.ram('showing') == game.sym['TALK_FOREMAN'] and game.ram('balls') == game.ram('ball_counts'),
+          "and starts over, with the foreman's word and the balls of a new game")
     print('ok: Delete Save asked first, Esc and No kept the save, and Yes deleted it')
     game.close()
 

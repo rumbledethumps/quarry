@@ -1,6 +1,7 @@
 /* Every gameplay number, so a playtest change is a one-line edit.
    The game steps once per VSYNC, 60 times a second. Speeds are in
-   1/256 pixel per step, so 256 is one pixel per step. */
+   1/256 pixel per step, so 256 is one pixel per step, but for the sled's,
+   in pixels a second, as its panel shows them. */
 
 #ifndef TUNING_H
 #define TUNING_H
@@ -11,8 +12,7 @@
 #define TUNE_BUILD_STEPS 120  /* 2 seconds */
 #define TUNE_RISE_STEPS 45    /* of them, the sled's rise from below the screen */
 
-/* Balls */
-#define TUNE_BALLS 5          /* balls at the start of a level */
+/* Balls. The balls at the start of a level are the upgrade's, below. */
 #define TUNE_BALL_SPEED 640   /* 2.5 px per step */
 #define TUNE_BALL_COME 1024   /* a new ball flies from the count to the sled, 4 px per step */
 
@@ -46,19 +46,28 @@
 /* Paddle */
 #define TUNE_PADDLE_Y 208     /* hover height, the top of the paddle */
 
-/* Upgrades, paid in gray nuggets. Each rank of an upgrade has its
-   value, starting with the value before any upgrade, and each rank after
-   the first has its cost. The build draws a sled for each width, with
-   its jets. */
-#define TUNE_WIDTHS {20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50} /* px, 64 at most */
-#define TUNE_WIDTH_COSTS {3, 4, 5, 6, 7, 9, 11, 13, 15, 17}
-#define TUNE_JETS {1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3} /* under the sled of each width, 3 at most */
-#define TUNE_SPEEDS {512, 576, 640, 704, 768} /* 2 to 3 px per step */
-#define TUNE_SPEED_COSTS {6, 10, 16, 24}
-#define TUNE_DAMAGES {1, 2, 3, 4}  /* a brick's hits each hit of the ball takes */
-#define TUNE_DAMAGE_COSTS {10, 20, 40}
-#define TUNE_BURNS {42, 41, 40, 39, 38, 37} /* 1/10 L a second: 4.2 to 3.7, a tank 24 to 27 seconds */
-#define TUNE_BURN_COSTS {5, 10, 15, 20, 25}
+/* Upgrades, paid in nuggets, in the order of their panels. Each rank of
+   an upgrade has its value, starting with the value before any upgrade,
+   and each rank after the first has its cost, of up to three counts of
+   nuggets, each gray unless it says another color, as RED(4) is 4 red:
+   {25, RED(5)} is 25 gray and 5 red. The build draws a sled for each
+   width, with its jets. */
+#define RED(n) ((n) | (unsigned)BRICK_RED << COST_COLOR_SHIFT)
+#define GREEN(n) ((n) | (unsigned)BRICK_GREEN << COST_COLOR_SHIFT)
+#define BLUE(n) ((n) | (unsigned)BRICK_BLUE << COST_COLOR_SHIFT)
+#define GOLD(n) ((n) | (unsigned)BRICK_GOLD << COST_COLOR_SHIFT)
+#define TUNE_BURNS {50, 40, 35, 30, 26, 22, 18, 16, 14, 12, 10} /* 1/10 L a second */
+#define TUNE_BURN_COSTS {{5}, {10}, {20}, {25}, {25, RED(5)}, {25, RED(10)}, {25, RED(25)}, \
+                         {25, RED(25), GREEN(5)}, {25, RED(25), GREEN(10)}, {25, RED(25), GREEN(25)}}
+#define TUNE_BALLS {1, 2, 3, 4, 5, 6} /* at the start of a level */
+#define TUNE_BALL_COSTS {{1}, {20}, {25, RED(25)}, {30, GREEN(30)}, {50, RED(50), GREEN(50)}}
+#define TUNE_DAMAGES {1, 2, 3, 4, 5, 6, 7}  /* a brick's hit */
+#define TUNE_DAMAGE_COSTS {{RED(1)}, {RED(10)}, {RED(25)}, {GREEN(1)}, {GREEN(5)}, {GREEN(25)}}
+#define TUNE_SPEEDS {100, 110, 120, 130, 140, 150} /* px a second */
+#define TUNE_SPEED_COSTS {{10}, {25}, {RED(10)}, {RED(25)}, {GREEN(10)}}
+#define TUNE_WIDTHS {17, 20, 23, 26, 30, 34, 38} /* px, 64 at most */
+#define TUNE_WIDTH_COSTS {{10}, {25}, {25, RED(5)}, {25, RED(10)}, {25, GREEN(10)}, {25, RED(25), GREEN(25)}}
+#define TUNE_JETS {1, 1, 1, 2, 2, 2, 3} /* visible jets, 3 at most */
 
 /* The paddle is cut into six zones of equal width. The two in the center
    send the ball up steeply, the zones beside them at 45 degrees, and the

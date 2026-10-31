@@ -30,6 +30,18 @@ def bricks_shown(game):
             if y != hidden}
 
 
+def aim(game):
+    """Of the bricks a ball going straight up from under them all would hit
+    first, the one laid last, and the x for the ball, in px."""
+    w, size = game.sym['BRICK_W'], game.sym['BALL_SIZE']
+    shown = bricks_shown(game)
+    under = lambda x: max((i for i, (bx, _) in shown.items() if bx < x + size and x < bx + w),
+                          key=lambda i: shown[i][1])
+    hit = {under(x + (w - size) // 2): x + (w - size) // 2 for x, _ in shown.values()}
+    last = max(hit, key=lambda i: (-shown[i][1], shown[i][0]))
+    return last, hit[last]
+
+
 def rising(game):
     """The top of each bubble rising through the fuel, in px, from RAM, or
     None for one that is not."""
@@ -44,7 +56,7 @@ def main():
     game = Game()
     sym = game.sym
     steps, rise, paddle_y = sym['TUNE_BUILD_STEPS'], sym['TUNE_RISE_STEPS'], sym['TUNE_PADDLE_Y']
-    bricks, balls = sym['LEVEL1_BRICKS'], sym['TUNE_BALLS']
+    bricks = sym['LEVEL1_BRICKS']
     sled, ball = 'XRAM_SLED_SPRITE', 'XRAM_BALL_SPRITE'
     count = lambda: game.count('XRAM_BALL_DIGITS', sym['BALL_DIGITS'])
 
@@ -54,6 +66,7 @@ def main():
     game.tap('space')  # START GAME
     game.until('game_state', 'STATE_PLAY')
     game.until('talk_state', 'TALK_READY', 120)
+    balls = game.ram('ball_counts')  # a new game's, with none bought
     check(not bricks_shown(game), 'no bricks under the welcome')
     check(game.sprite(sled)[1] >= sym['SCREEN_H'] or game.sprite(sled)[1] == sym['SPRITE_HIDDEN_Y'], 'no sled')
     check(game.sprite(ball)[1] == sym['SPRITE_HIDDEN_Y'], 'no ball')
@@ -114,14 +127,15 @@ def main():
     print('ok: the ball came from the count, and the meter came up')
 
     # A lost ball: the next flies from the count, which drops as it leaves,
-    # and the fuel drains the while.
+    # and the fuel drains the while. Two spare balls in the count, so there
+    # is a next one, and one is left to show the count drop.
     game.tap('space')
     game.wait('launch', 5)
     game.run(20)
-    game.paused_poke([('ball_y', 225 << 8, 4), ('ball_vx', 0, 2), ('ball_vy', 600, 2)])
+    game.paused_poke([('balls', 2, 1), ('ball_y', 225 << 8, 4), ('ball_vx', 0, 2), ('ball_vy', 600, 2)])
     game.wait('ball lost', 10)
     game.wait('ball comes', 5)
-    check(count() == balls - 2, 'the next ball leaves the count')
+    check(count() == 1 and game.ram('balls') == 1, 'the next ball leaves the count')
     energy = game.ram('energy', 2)
     game.wait('ball landed', 120)
     check(game.ram('energy', 2) < energy, 'the fuel drains while it comes')
@@ -130,12 +144,19 @@ def main():
     # Restart with the sled hovering: the ball goes at once, the sled stays
     # and is the player's, the broken bricks stay gone until they are laid
     # again, the fuel rises only once the fill reaches it, and the meter
-    # goes down, to come up again once the ball lands.
+    # goes down, to come up again once the ball lands. A brick is broken
+    # first, whatever the level: the ball is poked under every brick, two
+    # balls above the sled, going straight up into the last laid of those
+    # it can reach, which is poked to take one hit.
     game.tap('space')
-    game.wait('brick', 600)
+    game.wait('launch', 5)
+    target, at = aim(game)
+    game.paused_poke([(f'brick_hits+{target}', 1, 1), ('ball_x', at << 8, 4),
+                      ('ball_y', (paddle_y - 2 * sym['BALL_SIZE']) << 8, 4), ('ball_vx', 0, 2), ('ball_vy', -600, 2)])
+    game.wait('brick', 120)
     game.run(3)
     broken = set(range(bricks)) - set(bricks_shown(game))
-    check(broken, 'a brick is broken')
+    check(target in broken, f'brick {target} is broken')
     x = game.sprite(sled)[0]
     held = game.ram('rows')
     game.tap('escape')
@@ -171,7 +192,9 @@ def main():
     game.tap('space')
     game.wait('launch', 5)
     game.run(20)
-    game.paused_poke([('ball_y', 225 << 8, 4), ('ball_vx', 0, 2), ('ball_vy', 600, 2), ('energy', 30 * game.ram('burns'), 2)])
+    # A spare ball in the count, so one comes when this one is lost.
+    game.paused_poke([('balls', 1, 1), ('ball_y', 225 << 8, 4), ('ball_vx', 0, 2), ('ball_vy', 600, 2),
+                      ('energy', 30 * game.ram('burns'), 2)])
     game.wait('ball comes', 10)
     game.wait('out of energy', 40)
     check(game.ram('ball_state') == sym['BALL_COMING'], 'out of fuel, the ball still comes to the sled')

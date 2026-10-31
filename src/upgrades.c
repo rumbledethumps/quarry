@@ -5,42 +5,63 @@
 #include "tuning.h"
 #include "xram.h"
 
-static const uint8_t widths[] = TUNE_WIDTHS;
-static const uint16_t width_costs[] = TUNE_WIDTH_COSTS;
-static const uint16_t speeds[] = TUNE_SPEEDS;
-static const uint16_t speed_costs[] = TUNE_SPEED_COSTS;
-static const uint8_t damages[] = TUNE_DAMAGES;
-static const uint16_t damage_costs[] = TUNE_DAMAGE_COSTS;
-static const uint8_t burns[] = TUNE_BURNS;
-static const uint16_t burn_costs[] = TUNE_BURN_COSTS;
-static const uint8_t jets[] = TUNE_JETS;
+/* The tables are used and retained, so they stay whole in RAM for the
+   tests to read: without, the compiler and the linker could do without
+   one such as {1, 2, 3}, working its values out instead. A cost of more
+   parts than COST_PARTS fails the build, so none is dropped. */
+#pragma clang diagnostic error "-Wexcess-initializers"
+__attribute__((used, retain)) static const uint8_t ball_counts[] = TUNE_BALLS;
+__attribute__((used, retain)) static const uint16_t ball_costs[][COST_PARTS] = TUNE_BALL_COSTS;
+__attribute__((used, retain)) static const uint8_t damages[] = TUNE_DAMAGES;
+__attribute__((used, retain)) static const uint16_t damage_costs[][COST_PARTS] = TUNE_DAMAGE_COSTS;
+__attribute__((used, retain)) static const uint8_t burns[] = TUNE_BURNS;
+__attribute__((used, retain)) static const uint16_t burn_costs[][COST_PARTS] = TUNE_BURN_COSTS;
+__attribute__((used, retain)) static const uint16_t speeds[] = TUNE_SPEEDS;
+__attribute__((used, retain)) static const uint16_t speed_costs[][COST_PARTS] = TUNE_SPEED_COSTS;
+__attribute__((used, retain)) static const uint8_t widths[] = TUNE_WIDTHS;
+__attribute__((used, retain)) static const uint16_t width_costs[][COST_PARTS] = TUNE_WIDTH_COSTS;
+__attribute__((used, retain)) static const uint8_t jets[] = TUNE_JETS;
 
 /* The ranks after the first, one for each cost. */
-#define WIDTH_RANKS (sizeof width_costs / sizeof *width_costs)
-#define SPEED_RANKS (sizeof speed_costs / sizeof *speed_costs)
+#define BALL_RANKS (sizeof ball_costs / sizeof *ball_costs)
 #define DAMAGE_RANKS (sizeof damage_costs / sizeof *damage_costs)
 #define BURN_RANKS (sizeof burn_costs / sizeof *burn_costs)
+#define SPEED_RANKS (sizeof speed_costs / sizeof *speed_costs)
+#define WIDTH_RANKS (sizeof width_costs / sizeof *width_costs)
 
-_Static_assert(WIDTH_RANKS == sizeof widths / sizeof *widths - 1,
-               "TUNE_WIDTH_COSTS needs a cost for each width after the first.");
-_Static_assert(SPEED_RANKS == sizeof speeds / sizeof *speeds - 1,
-               "TUNE_SPEED_COSTS needs a cost for each speed after the first.");
+_Static_assert(BALL_RANKS == sizeof ball_counts / sizeof *ball_counts - 1,
+               "TUNE_BALL_COSTS needs a cost for each count of balls after the first.");
 _Static_assert(DAMAGE_RANKS == sizeof damages / sizeof *damages - 1,
                "TUNE_DAMAGE_COSTS needs a cost for each damage after the first.");
 _Static_assert(BURN_RANKS == sizeof burns / sizeof *burns - 1,
                "TUNE_BURN_COSTS needs a cost for each burn after the first.");
-_Static_assert(WIDTH_RANKS <= UPGRADE_RANKS_MAX && SPEED_RANKS <= 5 && DAMAGE_RANKS <= UPGRADE_RANKS_MAX &&
-                   BURN_RANKS <= UPGRADE_RANKS_MAX,
-               "Too many ranks: 10 widths, 5 speeds, 10 damages and 10 burns after the first at most.");
+_Static_assert(SPEED_RANKS == sizeof speeds / sizeof *speeds - 1,
+               "TUNE_SPEED_COSTS needs a cost for each speed after the first.");
+_Static_assert(WIDTH_RANKS == sizeof widths / sizeof *widths - 1,
+               "TUNE_WIDTH_COSTS needs a cost for each width after the first.");
+_Static_assert(BALL_RANKS <= UPGRADE_RANKS_MAX && DAMAGE_RANKS <= UPGRADE_RANKS_MAX &&
+                   BURN_RANKS <= UPGRADE_RANKS_MAX && SPEED_RANKS <= UPGRADE_RANKS_MAX &&
+                   WIDTH_RANKS <= UPGRADE_RANKS_MAX,
+               "Too many ranks: 10 of each upgrade after the first at most.");
 _Static_assert(sizeof jets == sizeof widths, "TUNE_JETS needs the jets of each width.");
 _Static_assert(sizeof widths <= SLEDS, "SLEDS in xram.h needs a sled for each width.");
+_Static_assert(BRICK_GOLD < 1 << (16 - COST_COLOR_SHIFT), "A part's color fits its top bits.");
 
 /* Each upgrade's costs, its ranks after the first, and its name for the
    log. */
-static const uint16_t *const costs[UPGRADES] = {width_costs, speed_costs, damage_costs, burn_costs};
-static const uint8_t ranks[UPGRADES] = {WIDTH_RANKS, SPEED_RANKS, DAMAGE_RANKS, BURN_RANKS};
+static const uint16_t (*const costs[UPGRADES])[COST_PARTS] = {
+    [UPGRADE_EFFICIENCY] = burn_costs, [UPGRADE_BALLS] = ball_costs, [UPGRADE_DAMAGE] = damage_costs,
+    [UPGRADE_SPEED] = speed_costs,     [UPGRADE_WIDTH] = width_costs,
+};
+__attribute__((used, retain)) static const uint8_t ranks[UPGRADES] = {
+    [UPGRADE_EFFICIENCY] = BURN_RANKS, [UPGRADE_BALLS] = BALL_RANKS, [UPGRADE_DAMAGE] = DAMAGE_RANKS,
+    [UPGRADE_SPEED] = SPEED_RANKS,     [UPGRADE_WIDTH] = WIDTH_RANKS,
+};
 #ifndef NDEBUG
-static const char *const names[UPGRADES] = {"width", "speed", "damage", "efficiency"};
+static const char *const names[UPGRADES] = {
+    [UPGRADE_EFFICIENCY] = "efficiency", [UPGRADE_BALLS] = "balls", [UPGRADE_DAMAGE] = "damage",
+    [UPGRADE_SPEED] = "speed",           [UPGRADE_WIDTH] = "width",
+};
 #endif
 
 uint8_t upgrade_ranks[UPGRADES];
@@ -51,25 +72,66 @@ uint8_t upgrades_max(uint8_t upgrade)
     return ranks[upgrade];
 }
 
-/* The cost of the next rank, in gray nuggets. 0 at the highest rank. */
-uint16_t upgrades_cost(uint8_t upgrade)
+/* The parts of the next rank's cost, as tuning.h has them, or 0 at the
+   highest rank. */
+const uint16_t *upgrades_cost(uint8_t upgrade)
 {
     uint8_t rank = upgrade_ranks[upgrade];
 
     return rank < ranks[upgrade] ? costs[upgrade][rank] : 0;
 }
 
+/* The nuggets of a color the next rank costs, in all its parts. */
+uint16_t upgrades_cost_in(uint8_t upgrade, uint8_t color)
+{
+    const uint16_t *cost = upgrades_cost(upgrade);
+    uint16_t n = 0;
+    uint8_t i;
+
+    if (cost)
+        for (i = 0; i < COST_PARTS; i++)
+            if (COST_COLOR(cost[i]) == color)
+                n += COST_COUNT(cost[i]);
+    return n;
+}
+
+/* Whether the next rank can be bought: there is one, and nuggets enough
+   of every color it costs. */
+static uint8_t can_buy(uint8_t upgrade)
+{
+    uint8_t color;
+
+    if (!upgrades_cost(upgrade))
+        return 0;
+    for (color = 0; color < BRICK_COLORS; color++)
+        if (nuggets[color] < upgrades_cost_in(upgrade, color))
+            return 0;
+    return 1;
+}
+
 /* Buys the next rank if there are nuggets enough. Returns whether it did. */
 uint8_t upgrades_buy(uint8_t upgrade)
 {
-    uint16_t cost = upgrades_cost(upgrade);
+    const uint16_t *cost = upgrades_cost(upgrade);
+    uint8_t i;
 
-    if (!cost || nuggets[BRICK_GRAY] < cost)
+    if (!can_buy(upgrade))
         return 0;
-    nuggets[BRICK_GRAY] -= cost;
+    for (i = 0; i < COST_PARTS; i++)
+        nuggets[COST_COLOR(cost[i])] -= COST_COUNT(cost[i]);
     upgrade_ranks[upgrade]++;
     DEBUG_LOG("bought %s %u\n", names[upgrade], upgrade_ranks[upgrade]);
     return 1;
+}
+
+uint8_t upgrades_balls(void)
+{
+    return ball_counts[upgrade_ranks[UPGRADE_BALLS]];
+}
+
+uint8_t upgrades_balls_at(uint8_t rank)
+{
+    return ball_counts[rank];
 }
 
 uint8_t upgrades_width(void)
@@ -87,11 +149,14 @@ uint8_t upgrades_jets_at(uint8_t rank)
     return jets[rank];
 }
 
+/* The sled's speed, in 1/256 px a step, from its px a second, to the
+   nearest. */
 uint16_t upgrades_speed(void)
 {
-    return speeds[upgrade_ranks[UPGRADE_SPEED]];
+    return ((uint32_t)speeds[upgrade_ranks[UPGRADE_SPEED]] * 256 + 30) / 60;
 }
 
+/* A rank's speed in px a second, as its panel shows it. */
 uint16_t upgrades_speed_at(uint8_t rank)
 {
     return speeds[rank];

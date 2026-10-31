@@ -5,9 +5,10 @@
 
 The bot reads the ball and the paddle sprites each step and steers the
 paddle under the ball with the arrow keys. With --miss N it lets the first
-N balls fall. Every step it checks that the ball stays inside the playfield
-and never moves farther a step than its speed, TUNE_BALL_SPEED, rounded up
-to a whole pixel. It stops at the end of the level,
+N balls fall, or as many as the level has. Every step it checks that the
+ball stays inside the playfield and never moves farther a step than its
+speed, TUNE_BALL_SPEED, rounded up to a whole pixel. It stops at the end
+of the level,
 reports how the level ended, checks a nugget landed for each broken brick,
 then chooses Play on the end-of-level menu and checks that the level starts
 again. It runs on a Release ROM too.
@@ -38,7 +39,12 @@ def main():
     paddle_y, paddle_w = sym['TUNE_PADDLE_Y'], game.ram('paddle_width')
     ball = sym['BALL_SIZE']
     bricks = sym['LEVEL1_BRICKS']
-    balls = sym['TUNE_BALLS']
+    # The nuggets of every color, whatever colors the level's bricks are.
+    nuggets = lambda: sum(game.ram(f'nuggets+{2 * c}', 2) for c in range(sym['BRICK_COLORS']))
+    # A level starts with the balls of the BALLS upgrade's rank, the first
+    # in a new game, where one lost ball ends the level.
+    rank = game.ram(f"upgrade_ranks+{sym['UPGRADE_BALLS']}")
+    balls = game.ram(f'ball_counts+{rank}')
 
     def predict(x, y, dx, dy):
         """The ball's left edge when it reaches the paddle, off the side walls."""
@@ -135,20 +141,20 @@ def main():
         check(len(images) > 1, 'the flames still burn as the sled flies home')
     game.run(90)
     check(game.shown('XRAM_BRICKS', bricks) == left, 'a sprite for each brick left')
-    counted = game.ram('nuggets', 2)
+    counted = nuggets()
     check(counted == bricks - left, f'a nugget for each broken brick, {counted} of {bricks - left}')
 
     # Replay starts the level again.
     if held:
         game.cmd(f'release {held}')
-    game.menu_choose('REPLAY', wait=False)
+    game.menu_choose('REPLAY')
     game.run(5)
     check(game.ram('game_state') == sym['STATE_PLAY'], 'the level starts again')
     check(game.ram('bricks_left') == bricks, 'the bricks come back')
     game.ready()
     check(game.shown('XRAM_BRICKS', bricks) == bricks, 'the brick sprites come back')
     check(game.ram('balls') == balls - 1, 'the balls come back, one on the sled')
-    check(game.ram('nuggets', 2) == counted, 'the nuggets are kept')
+    check(nuggets() == counted, 'the nuggets are kept')
     check(count() == balls - 1, 'the count of balls comes back')
     check(game.ram('energy', 2) == full, 'the energy is full again')
     check(not game.shows('TO THE DRY'), 'the menu is gone')

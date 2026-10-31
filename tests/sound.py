@@ -39,6 +39,11 @@ def channels(game):
             for i in range(0, len(data), 8)]
 
 
+def ram(game, name, size):
+    """The bytes of the game's RAM from name."""
+    return bytes.fromhex(game.cmd(f'dump {name} {size}'))
+
+
 def wave(game, name):
     return game.sym[f'PSG_WAVE_{name}']
 
@@ -65,10 +70,19 @@ def main():
     game.run(5)
 
     # The ball off the bricks, and the bricks breaking, with a chime for
-    # each nugget. With the ball back on the paddle, so nothing else
-    # breaks, the nuggets land in the counts without a sound.
+    # each nugget: the ball aimed up at the lowest brick, which breaks at a
+    # hit. With the ball back on the paddle, so nothing else breaks, the
+    # nuggets land in the counts without a sound.
     game.tap('space')
-    played(game, 'BREAK', 300)
+    count = game.ram('brick_count')
+    ys, xs = (struct.unpack(f'<{count}h', ram(game, name, 2 * count)) for name in ('brick_y', 'brick_x'))
+    alive = ram(game, 'brick_alive', count)
+    low = max((y, i) for i, y in enumerate(ys) if alive[i])[1]
+    game.paused_poke([(f'brick_hits+{low}', 1, 1), (f'brick_damage+{low}', 0, 1),
+                       ('ball_x', (xs[low] + (sym['BRICK_W'] - sym['BALL_SIZE']) // 2) << 8, 4),
+                       ('ball_y', (ys[low] + sym['BRICK_H'] + 4) << 8, 4),
+                       ('ball_vx', 0, 2), ('ball_vy', -600 & 0xFFFF, 2)])
+    played(game, 'BREAK', 30)
     played(game, 'NUGGET', 5)
     played(game, 'BRICK', 5)
     game.paused_poke([('ball_state', sym['BALL_DOCKED'], 1)])
@@ -89,8 +103,9 @@ def main():
     played(game, 'PADDLE', 20)
     print('ok: wall and paddle')
 
-    # A lost ball whistles down.
-    game.paused_poke([('ball_x', 100 << 8, 4), ('ball_y', 225 << 8, 4),
+    # A lost ball whistles down. A spare ball in the count, so the level
+    # goes on after this one is lost.
+    game.paused_poke([('balls', 1, 1), ('ball_x', 100 << 8, 4), ('ball_y', 225 << 8, 4),
                        ('ball_vx', 0, 2), ('ball_vy', 600, 2)])
     played(game, 'LOST', 20)
     game.run(1)
@@ -103,33 +118,41 @@ def main():
     check(later < first, f'the whistle slides down, {first} then {later}')
     print(f'ok: lost ball, sliding from {first} to {later}')
 
-    # Low energy beeps, then beeps again while it stays low.
-    game.paused_poke([('energy', sym['TUNE_ENERGY_LOW'] + 10 * game.ram('burns'), 2)])
+    # Low energy beeps, then beeps again while it stays low, if the burn
+    # bought leaves it low long enough for another.
+    burn = game.ram(f'burns+{game.ram("upgrade_ranks+UPGRADE_EFFICIENCY")}')
+    game.paused_poke([('energy', sym['TUNE_ENERGY_LOW'] + 10 * burn, 2)])
     played(game, 'LOW', 30)
-    played(game, 'LOW_BEEP', 200)
-    print('ok: low energy, and beeps while low')
+    if sym['TUNE_ENERGY_LOW'] // burn > sym['LOW_BEEP_STEPS']:
+        played(game, 'LOW_BEEP', sym['LOW_BEEP_STEPS'] + 20)
+        print('ok: low energy, and beeps while low')
+    else:
+        print(f'ok: low energy; note: a burn of {burn} empties the tank before a second beep, so none is checked')
 
     # Out of energy: the flames sputter, then the paddle falls.
-    game.paused_poke([('energy', 5 * game.ram('burns'), 2)])
+    game.paused_poke([('energy', 5 * burn, 2)])
     played(game, 'SPUTTER', 20)
     played(game, 'FALL', 60)
     game.until('game_state', 'STATE_MENU', 200)
     print('ok: sputter and fall')
 
     # On the menu when a level ends and on the upgrade screen, moves click,
-    # and a purchase plays four notes, letting go between them.
+    # and a purchase plays four notes, letting go between them: the next
+    # rank of the panel picked, with just the nuggets of each color it costs.
     game.run(70)
     game.tap('down')
     played(game, 'MOVE', 5)
     game.tap('up')
-    game.menu_choose('TO THE DRY', wait=False)
+    game.menu_choose('TO THE DRY')
     game.cmd('expect "upgrades"')  # past every click before the upgrade screen
     game.talk_ok()
-    game.poke('nuggets', 50, 2)
     game.tap('right')
     played(game, 'MOVE', 5)
     game.tap('left')
     game.run(20)
+    for color, count in enumerate(game.cost_in(game.ram('panel_picked'))):
+        if count:
+            game.poke(f'nuggets+{2 * color}', count, 2)
     game.cmd('press enter')
     played(game, 'BUY', 10)
     game.cmd('release enter')
